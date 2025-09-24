@@ -18,10 +18,8 @@ import org.springframework.transaction.annotation.EnableTransactionManagement;
 @MapperScan(basePackages = "org.luckyjourney.mapper")
 @EnableScheduling
 public class LuckyJourneyApplication {
-
     public static void main(String[] args) {
         AuthorityUtils.setGlobalVerify(true,new BaseAuthority());
         SpringApplication.run(LuckyJourneyApplication.class, args);
-
     }
 }

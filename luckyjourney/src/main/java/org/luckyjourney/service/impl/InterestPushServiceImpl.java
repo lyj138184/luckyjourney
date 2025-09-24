@@ -11,6 +11,7 @@ import org.luckyjourney.entity.vo.UserModel;
 import org.luckyjourney.service.InterestPushService;
 import org.luckyjourney.service.video.TypeService;
 import org.luckyjourney.util.RedisCacheUtil;
+import org.luckyjourney.util.RedisPartitionUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 import org.springframework.data.redis.connection.RedisConnection;
@@ -44,6 +45,9 @@ public class InterestPushServiceImpl implements InterestPushService {
     private RedisTemplate redisTemplate;
 
 
+    // 分类视频集合按照最近 7 天拆分，控制单个 Redis Set 的体量
+    private static final int TYPE_PARTITION_WINDOW_DAYS = 7;
+
     final ObjectMapper objectMapper = new ObjectMapper();
 
     @Override
@@ -64,19 +68,51 @@ public class InterestPushServiceImpl implements InterestPushService {
     @Async
     public void pushSystemTypeStockIn(Video video) {
         final Long typeId = video.getTypeId();
-        redisCacheUtil.sSet(RedisConstant.SYSTEM_TYPE_STOCK + typeId,video.getId());
+        if (typeId == null) {
+            return;
+        }
+        // 基于视频 ID 解析出的时间戳生成分片 key，实现按天切分分类集合
+        final String partitionKey = RedisPartitionUtil.resolveTypeStockKey(typeId, video.getId(), video.getGmtCreated());
+        redisCacheUtil.sSet(partitionKey, video.getId());
     }
 
     @Override
     public Collection<Long> listVideoIdByTypeId(Long typeId) {
-        // 随机推送10个
-
-            final List<Object> list = redisTemplate.opsForSet().randomMembers(RedisConstant.SYSTEM_TYPE_STOCK + typeId, 12);
-        // 可能会有null
-        final HashSet<Long> result = new HashSet<>();
-        for (Object aLong : list) {
-            if (aLong!=null){
-                result.add(Long.parseLong(aLong.toString()));
+        if (typeId == null) {
+            return Collections.emptyList();
+        }
+        final LinkedHashSet<Long> result = new LinkedHashSet<>();
+        final List<String> partitionKeys = RedisPartitionUtil.recentTypeStockKeys(typeId, TYPE_PARTITION_WINDOW_DAYS);
+        final int targetSize = 12;
+        for (String key : partitionKeys) {
+            if (result.size() >= targetSize) {
+                break;
+            }
+            final int remaining = targetSize - result.size();
+            if (remaining <= 0) {
+                break;
+            }
+            // 依次从最近的分片集合中随机抽样，尽量命中最新内容
+            final List<Object> samples = redisTemplate.opsForSet().randomMembers(key, remaining);
+            if (ObjectUtils.isEmpty(samples)) {
+                continue;
+            }
+            for (Object sample : samples) {
+                if (sample != null) {
+                    result.add(Long.parseLong(sample.toString()));
+                }
+            }
+        }
+        final int fallbackRequired = targetSize - result.size();
+        if (fallbackRequired > 0) {
+            // 为兼容历史数据，若近几天的分片不足，则从旧的大 Key 补充视频 ID
+            final List<Object> fallback = redisTemplate.opsForSet().randomMembers(RedisConstant.SYSTEM_TYPE_STOCK + typeId, fallbackRequired);
+            if (!ObjectUtils.isEmpty(fallback)) {
+                for (Object sample : fallback) {
+                    if (sample != null) {
+                        result.add(Long.parseLong(sample.toString()));
+                    }
+                }
             }
         }
         return result;
@@ -207,7 +243,6 @@ public class InterestPushServiceImpl implements InterestPushService {
                     }
                 }
 
-
                 videoIds.addAll(ids);
 
                 // 随机挑选一个视频,根据性别: 男：美女 女：宠物
@@ -215,7 +250,6 @@ public class InterestPushServiceImpl implements InterestPushService {
                 if (aLong!=null){
                     videoIds.add(aLong);
                 }
-
 
                 return videoIds;
             }
@@ -258,7 +292,14 @@ public class InterestPushServiceImpl implements InterestPushService {
     @Async
     public void deleteSystemTypeStockIn(Video video) {
         final Long typeId = video.getTypeId();
-        redisCacheUtil.setRemove(RedisConstant.SYSTEM_TYPE_STOCK + typeId,video.getId());
+        if (typeId == null) {
+            return;
+        }
+        // 计算出视频当日所属的分片并删除，避免残留脏数据
+        final String partitionKey = RedisPartitionUtil.resolveTypeStockKey(typeId, video.getId(), video.getGmtCreated());
+        redisCacheUtil.setRemove(partitionKey, video.getId());
+        // Also clean legacy key for compatibility.
+        redisCacheUtil.setRemove(RedisConstant.SYSTEM_TYPE_STOCK + typeId, video.getId());
     }
 
 

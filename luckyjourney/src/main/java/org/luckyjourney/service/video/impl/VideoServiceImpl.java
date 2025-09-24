@@ -38,6 +38,7 @@ import org.luckyjourney.service.video.VideoShareService;
 import org.luckyjourney.service.video.VideoStarService;
 import org.luckyjourney.util.FileUtil;
 import org.luckyjourney.util.RedisCacheUtil;
+import org.luckyjourney.util.SnowflakeIdGenerator;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ZSetOperations;
@@ -162,6 +163,10 @@ public class VideoServiceImpl extends ServiceImpl<VideoMapper, Video> implements
             video.setUrl(null);
             video.setCover(null);
         } else {
+            // 首次创建视频时，使用雪花算法生成全局唯一且包含时间信息的 ID，方便后续做时间分片
+            if (video.getId() == null) {
+                video.setId(SnowflakeIdGenerator.nextId());
+            }
 
             // 如果没设置封面,我们帮他设置一个封面
             if (ObjectUtils.isEmpty(video.getCover())) {

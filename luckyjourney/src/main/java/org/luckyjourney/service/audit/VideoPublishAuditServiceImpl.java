@@ -21,6 +21,7 @@ import org.springframework.beans.factory.config.BeanPostProcessor;
 import org.springframework.stereotype.Service;
 import org.springframework.util.ObjectUtils;
 
+import javax.annotation.PostConstruct;
 import java.util.Collection;
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -33,7 +34,7 @@ import java.util.concurrent.TimeUnit;
  * @CreateTime: 2023-10-29 14:40
  */
 @Service
-public class VideoPublishAuditServiceImpl implements AuditService<VideoTask,VideoTask> , InitializingBean,BeanPostProcessor {
+public class VideoPublishAuditServiceImpl implements AuditService<VideoTask,VideoTask> ,BeanPostProcessor {
 
     @Autowired
     private FeedService feedService;
@@ -175,8 +176,15 @@ public class VideoPublishAuditServiceImpl implements AuditService<VideoTask,Vide
         return executor.getTaskCount() < maximumPoolSize;
     }
 
-    @Override
-    public void afterPropertiesSet() throws Exception {
-        executor  = new ThreadPoolExecutor(5, maximumPoolSize, 60, TimeUnit.SECONDS, new ArrayBlockingQueue(1000));
+    @PostConstruct // 使用注解代替接口
+    public void init() {
+        executor  = new ThreadPoolExecutor(
+                5,
+                maximumPoolSize,
+                60,
+                TimeUnit.SECONDS,
+                new ArrayBlockingQueue(1000),
+                new ThreadPoolExecutor.CallerRunsPolicy()
+        );
     }
 }
