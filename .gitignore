@@ -2,3 +2,4 @@ front-end/yarn.lock
 front-end/node_modules
 front-end/dist
 front-end/package-lock.json
+.idea
